@@ -53,7 +53,6 @@ class NNUEModel(nn.Module):
 
     def _init_psqt(self):
         input_weights = self.input.weight
-        input_bias = self.input.bias
         # 1.0 / kPonanzaConstant
         scale = 1 / self.quantization.nnue2score
 
@@ -76,10 +75,8 @@ class NNUEModel(nn.Module):
                 # inference during perspective averaging. We set it to 0
                 # just for the sake of it. It might still diverge away from 0
                 # due to gradient imprecision but it won't change anything.
-                input_bias[self.L1 + i] = 0.0
 
         self.input.weight = nn.Parameter(input_weights)
-        self.input.bias = nn.Parameter(input_bias)
 
     def clip_weights(self):
         """

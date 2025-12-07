@@ -58,7 +58,6 @@ def make_sparse_input_linear_forward_kernel(max_active_indices: int, output_size
 
     @param: output_size
         The number of outputs. Must match the shape of weights
-        and biases.
         This value is of type uint32.
     """
     num_threads = _get_num_threads_for_forward(output_size)
@@ -101,21 +100,15 @@ extern "C" __global__
         The weight matrix of shape (NUM_INPUTS, output_size).
         Weights must be of type float32.
 
-    @param: bias
-        The bias vector of shape (output_size,).
-        Bias values must be of type float32.
-
     @param: output
         An output matrix of shape (BATCH_SIZE, output_size).
-        It may not be initialized, bias is always copied
-        to the output first.
+        It may not be initialized
         Output values must have type float32.
 */
 void sparse_input_linear_forward(
     const int32_t* const input_indices,
     const float*   const input_values,
     const float*   const weight,
-    const float*   const bias,
           float*   const output
 ) {{
     __shared__
@@ -125,7 +118,6 @@ void sparse_input_linear_forward(
     const uint32_t       slice_offset        = threadIdx.x * {output_thread_slice_size};
 
           float*   const output_slice        = output + block_idx * {output_size} + slice_offset;
-    const float*   const bias_slice          = bias                               + slice_offset;
           float*         shared_output_slice = shared_output                      + slice_offset;
 
     const int32_t* const input_index_row     = input_indices + block_idx * {max_active_indices};
@@ -134,7 +126,7 @@ void sparse_input_linear_forward(
     #pragma unroll
     for (uint32_t s = 0; s < {output_thread_slice_size}; ++s)
     {{
-        shared_output_slice[s] = bias_slice[s];
+        shared_output_slice[s] = 0;
     }}
 
     for (uint32_t k = 0; k < {max_active_indices}; ++k)
@@ -187,7 +179,6 @@ def make_sparse_input_linear_backward_kernel(max_active_indices: int, output_siz
 
     @param: output_size
         The number of outputs. Must match the shape of weights
-        and biases.
         This value is of type uint32.
     """
     num_threads = _get_num_threads_for_backward(output_size)
@@ -231,12 +222,6 @@ extern "C" __global__
         on the first call.
         Weights must be of type float32.
 
-    @param: bias_grad
-        The bias gradient vector of shape (output_size,).
-        The gradient is accumulated, i.e. it must be zero initialized
-        on the first call.
-        Bias values must be of type float32.
-
     @param: output_grad
         An output gradient matrix of shape (BATCH_SIZE, output_size).
         Output values must have type float32.
@@ -245,7 +230,6 @@ void sparse_input_linear_backward(
     const int32_t* const input_indices,
     const float*   const input_values,
           float*   const weight_grad,
-          float*   const bias_grad,
     const float*   const output_grad
 ) {{
     __shared__
@@ -255,7 +239,6 @@ void sparse_input_linear_backward(
     const uint32_t       slice_offset             = threadIdx.x * {output_thread_slice_size};
 
     const float*   const output_grad_slice        = output_grad + block_idx * {output_size} + slice_offset;
-          float*   const bias_grad_slice          = bias_grad                               + slice_offset;
           float*         shared_output_grad_slice = shared_output_grad                      + slice_offset;
 
     const int32_t* const input_index_row          = input_indices + block_idx * {max_active_indices};
@@ -265,16 +248,6 @@ void sparse_input_linear_backward(
     for (uint32_t s = 0; s < {output_thread_slice_size}; ++s)
     {{
         shared_output_grad_slice[s] = output_grad_slice[s];
-    }}
-
-    #pragma unroll
-    for (uint32_t s = 0; s < {output_thread_slice_size}; ++s)
-    {{
-        const float sog = shared_output_grad_slice[s];
-        if (sog != 0.0f)
-        {{
-            atomicAdd(&bias_grad_slice[s], sog);
-        }}
     }}
 
     for (uint32_t k = 0; k < {max_active_indices}; ++k)
