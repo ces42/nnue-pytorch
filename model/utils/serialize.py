@@ -144,26 +144,23 @@ class NNUEWriter:
     def write_feature_transformer(self, model: NNUEModel, ft_compression: str) -> None:
         layer = model.input
 
-        bias = layer.bias.data[: model.L1]
 
         all_weight = coalesce_ft_weights(model.feature_set, layer)
         weight = all_weight[:, : model.L1]
         psqt_weight = all_weight[:, model.L1 :]
 
         def histogram_callback(
-            bias: torch.Tensor, weight: torch.Tensor, psqt_weight: torch.Tensor
+            weight: torch.Tensor, psqt_weight: torch.Tensor
         ):
-            ascii_hist("ft bias:", bias.numpy())
             ascii_hist("ft weight:", weight.numpy())
             ascii_hist("ft psqt weight:", psqt_weight.numpy())
 
-        bias, weight, psqt_weight = model.quantization.quantize_feature_transformer(
-            bias, weight, psqt_weight, histogram_callback
+        weight, psqt_weight = model.quantization.quantize_feature_transformer(
+             weight, psqt_weight, histogram_callback
         )
 
         # Weights stored as [num_features][outputs]
 
-        self.write_tensor(bias.flatten().numpy(), ft_compression)
         if model.feature_set.name.startswith("Full_Threats"):
             threat_weight = weight[:79856].to(torch.int8)
             psq_weight = weight[79856:]
@@ -314,7 +311,6 @@ class NNUEReader:
     ) -> None:
         shape = layer.weight.shape
 
-        bias = self.tensor(np.int16, [layer.bias.shape[0] - num_psqt_buckets])
         # weights stored as [num_features][outputs]
         if self.feature_set.name.startswith("Full_Threats"):
             threat_weight = self.tensor(np.int8, [79856, shape[1] - num_psqt_buckets])
@@ -324,13 +320,12 @@ class NNUEReader:
             weight = self.tensor(np.int16, [shape[0], shape[1] - num_psqt_buckets])
         psqt_weight = self.tensor(np.int32, [shape[0], num_psqt_buckets])
 
-        bias, weight, psqt_weight = (
+        weight, psqt_weight = (
             self.model.quantization.dequantize_feature_transformer(
-                bias, weight, psqt_weight
+                weight, psqt_weight
             )
         )
 
-        layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
         layer.weight.data = torch.cat([weight, psqt_weight], dim=1)
 
     def read_fc_layer(self, layer: nn.Linear, is_output: bool = False) -> None:

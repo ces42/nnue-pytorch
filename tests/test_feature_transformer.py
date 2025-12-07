@@ -16,7 +16,6 @@ def SparseLinearFunctionEmulate(
     input_indices: torch.Tensor,
     input_values: torch.Tensor,
     weight: torch.Tensor,
-    bias: torch.Tensor,
 ) -> torch.Tensor:
     batch_size = input_indices.shape[0]
     num_inputs = weight.shape[0]
@@ -30,7 +29,7 @@ def SparseLinearFunctionEmulate(
             value = input_values[i, j]
             inputs[i, feature] += value
 
-    return torch.mm(inputs, weight) + bias
+    return torch.mm(inputs, weight)
 
 
 def test():
@@ -42,10 +41,8 @@ def test():
 
     torch.manual_seed(0)
     weight0 = torch.rand(INPUT_SIZE, STRIDE, dtype=torch.float32, requires_grad=True)
-    bias0 = torch.rand(STRIDE, dtype=torch.float32, requires_grad=True)
     torch.manual_seed(0)
     weight1 = torch.rand(INPUT_SIZE, STRIDE, dtype=torch.float32, requires_grad=True)
-    bias1 = torch.rand(STRIDE, dtype=torch.float32, requires_grad=True)
     indices0 = (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES) * INPUT_SIZE).to(
         dtype=torch.int32
     )
@@ -56,16 +53,16 @@ def test():
     values1 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32)
 
     output00 = SparseLinearFunctionEmulate(
-        indices0.clone(), values0.clone(), weight0, bias0
+        indices0.clone(), values0.clone(), weight0
     )
     output01 = SparseLinearFunctionEmulate(
-        indices1.clone(), values1.clone(), weight0, bias0
+        indices1.clone(), values1.clone(), weight0
     )
     output10 = SparseLinearFunction.apply(
-        indices0.clone().cuda(), values0.clone().cuda(), weight1.cuda(), bias1.cuda()
+        indices0.clone().cuda(), values0.clone().cuda(), weight1.cuda()
     )
     output11 = SparseLinearFunction.apply(
-        indices1.clone().cuda(), values1.clone().cuda(), weight1.cuda(), bias1.cuda()
+        indices1.clone().cuda(), values1.clone().cuda(), weight1.cuda()
     )
 
     assert torch.max(torch.abs(output00.cpu() - output10.cpu())) < MAX_ERROR
@@ -73,7 +70,6 @@ def test():
     (output00 - output01).sum().backward()
     (output10 - output11).sum().backward()
     assert torch.max(torch.abs(weight0.grad.cpu() - weight1.grad.cpu())) < MAX_ERROR
-    assert torch.max(torch.abs(bias0.grad.cpu() - bias1.grad.cpu())) < MAX_ERROR
     print("Tests passed.")
 
 
