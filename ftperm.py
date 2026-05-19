@@ -535,7 +535,6 @@ def make_sparse_batch_provider(
         config=loader_config,
     )
 
-
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
     with torch.no_grad():
         batch_tuple = tuple(
@@ -586,7 +585,6 @@ def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
     # Apply the permutation in place.
     for f in model.input.features:
         f.weight.copy_(f.weight[:, ft_permutation])
-    model.input.bias.copy_(model.input.bias[ft_permutation])
     model.layer_stacks.l1.linear.weight.copy_(model.layer_stacks.l1.linear.weight[
         :, permutation
     ])

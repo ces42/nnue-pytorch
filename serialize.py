@@ -28,7 +28,7 @@ class SerializeConfig:
     Only works when serializing into a .nnue file."""
 
     ft_compression: Literal["none", "leb128"] = "leb128"
-    """Compression method to use for FT weights and biases.
+    """Compression method to use for FT weights.
     Either 'none' or 'leb128'. Only allowed if saving to .nnue."""
 
     ft_perm: Optional[str] = None

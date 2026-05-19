@@ -13,10 +13,10 @@ except (ImportError, OSError, RuntimeError):
     pass
 
 
-def _torch_sparse_linear(feature_indices, feature_values, weight, bias):
+def _torch_sparse_linear(feature_indices, feature_values, weight):
     """Device-agnostic fallback for SparseLinearFunction.
 
-    Computes: output[b] = sum_k(weight[indices[b,k]] * values[b,k]) + bias
+    Computes: output[b] = sum_k(weight[indices[b,k]] * values[b,k])
     Negative entries in feature_indices are treated as padding and
     contribute nothing to the sum. Uses F.embedding_bag for memory efficiency.
     """
@@ -30,7 +30,7 @@ def _torch_sparse_linear(feature_indices, feature_values, weight, bias):
         output = (gathered_weight * per_sample_weights).reshape(
             batch_size, max_active, weight.shape[1]
         ).sum(dim=1)
-        return output + bias
+        return output
 
     safe_indices = feature_indices.clamp(min=0).long().reshape(-1)
     per_sample_weights = (feature_values * mask).reshape(-1)
@@ -47,13 +47,13 @@ def _torch_sparse_linear(feature_indices, feature_values, weight, bias):
         mode="sum",
         per_sample_weights=per_sample_weights,
     )
-    return output + bias
+    return output
 
 
 class _CudaSparseLinearFunction(autograd.Function):
     @staticmethod
-    def forward(ctx, feature_indices, feature_values, weight, bias):
-        ctx.save_for_backward(feature_indices, feature_values, weight, bias)
+    def forward(ctx, feature_indices, feature_values, weight):
+        ctx.save_for_backward(feature_indices, feature_values, weight)
 
         assert len(feature_indices.shape) == 2
         assert len(feature_values.shape) == 2
@@ -65,22 +65,16 @@ class _CudaSparseLinearFunction(autograd.Function):
         assert len(weight.shape) == 2
         assert weight.dtype == torch.float32
 
-        assert len(bias.shape) == 1
-        assert bias.dtype == torch.float32
-
         assert feature_indices.is_cuda
         assert feature_values.is_cuda
         assert weight.is_cuda
-        assert bias.is_cuda
 
         assert feature_values.device == feature_indices.device
         assert weight.device == feature_indices.device
-        assert bias.device == feature_indices.device
 
         assert feature_indices.is_contiguous()
         assert feature_values.is_contiguous()
         assert weight.is_contiguous()
-        assert bias.is_contiguous()
 
         device = feature_indices.device
         batch_size = feature_indices.shape[0]
@@ -104,7 +98,6 @@ class _CudaSparseLinearFunction(autograd.Function):
                 feature_indices.data_ptr(),
                 feature_values.data_ptr(),
                 weight.data_ptr(),
-                bias.data_ptr(),
                 output.data_ptr(),
             ),
         )
@@ -118,7 +111,7 @@ class _CudaSparseLinearFunction(autograd.Function):
 
         grad_output = grad_output.contiguous()
 
-        feature_indices, feature_values, weight, bias = ctx.saved_tensors
+        feature_indices, feature_values, weight = ctx.saved_tensors
 
         device = feature_indices.device
         batch_size = feature_indices.shape[0]
@@ -128,7 +121,6 @@ class _CudaSparseLinearFunction(autograd.Function):
         weight_grad = torch.zeros(
             weight.shape[0], weight.shape[1], dtype=torch.float32, device=device
         )
-        bias_grad = torch.zeros(output_size, dtype=torch.float32, device=device)
 
         kernel = make_sparse_input_linear_backward_kernel(
             max_active_features, output_size
@@ -139,12 +131,11 @@ class _CudaSparseLinearFunction(autograd.Function):
                 feature_indices.data_ptr(),
                 feature_values.data_ptr(),
                 weight_grad.data_ptr(),
-                bias_grad.data_ptr(),
                 grad_output.data_ptr(),
             ),
         )
 
-        return None, None, weight_grad, bias_grad
+        return None, None, weight_grad
 
 
 class SparseLinearFunction:
@@ -153,9 +144,9 @@ class SparseLinearFunction:
     PyTorch implementation that works on any device (CPU, MPS).
     """
     @staticmethod
-    def apply(feature_indices, feature_values, weight, bias):
+    def apply(feature_indices, feature_values, weight):
         if _HAS_CUPY_KERNELS and feature_indices.is_cuda:
             return _CudaSparseLinearFunction.apply(
-                feature_indices, feature_values, weight, bias
+                feature_indices, feature_values, weight
             )
-        return _torch_sparse_linear(feature_indices, feature_values, weight, bias)
+        return _torch_sparse_linear(feature_indices, feature_values, weight)

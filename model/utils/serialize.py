@@ -175,19 +175,10 @@ class NNUEWriter:
     def write_feature_transformer(self, model: NNUEModel, ft_compression: str) -> None:
         layer = model.input
 
-        bias = layer.bias.data[: model.L1]
-
         # Get export weights (coalesced + remapped 12→11 piece types)
         export_weight = layer.get_export_weights()
         weight = export_weight[:, : model.L1]
         psqt_weight = export_weight[:, model.L1 :]
-
-        # biases are exported as i16s
-        biases = model.quantization.quantize_feature_transformer_bias(
-            bias, get_histogram_callback("", self.verbose)
-        )
-
-        self.write_tensor(biases, ft_compression)
 
         # Weights stored as [num_features][outputs]
         offset = 0
@@ -340,7 +331,6 @@ class NNUEReader:
         num_outputs = layer.num_outputs
         L1 = num_outputs - num_psqt_buckets
 
-        bias = self.tensor(np.int16, [L1])
         segments = []
         segments_psqt = []
 
@@ -354,17 +344,13 @@ class NNUEReader:
         weight = torch.cat(segments, dim=0)
         psqt_weight = torch.cat(segments_psqt, dim=0)
 
-        bias, weight, psqt_weight = (
+        weight, psqt_weight = (
             self.model.quantization.dequantize_feature_transformer(
-                bias, weight, psqt_weight
+                weight, psqt_weight
             )
         )
 
         # Combine weight and psqt_weight into export format, then expand
-        layer.bias.data = torch.cat([
-            bias.to(torch.float32),
-            torch.zeros(num_psqt_buckets, dtype=torch.float32)
-        ])
         export_weight = torch.cat([weight.to(torch.float32), psqt_weight.to(torch.float32)], dim=1)
         layer.load_export_weights(export_weight)
 
