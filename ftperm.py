@@ -535,6 +535,7 @@ def make_sparse_batch_provider(
         config=loader_config,
     )
 
+
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
     with torch.no_grad():
         batch_tuple = tuple(

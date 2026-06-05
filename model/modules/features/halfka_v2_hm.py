@@ -1,3 +1,5 @@
+import math
+
 import chess
 import torch
 from torch import nn
@@ -63,28 +65,46 @@ class HalfKav2Hm(InputFeature):
         self.virtual_weight = nn.Parameter(
             torch.zeros(self.NUM_INPUTS_VIRTUAL, num_outputs, dtype=torch.float32)
         )
+        self.virtual_bias = nn.Parameter(torch.empty(num_outputs, dtype=torch.float32))
+        self.num_psqt_buckets = 0
 
         self.reset_parameters()
 
+    def _fold_virtual_bias(self, weight: torch.Tensor, l1_size: int) -> torch.Tensor:
+        for bucket in range(self.NUM_BUCKETS):
+            own_king_src = bucket * self.NUM_PLANES + 10 * 64
+            ksq = InverseKingBuckets[bucket]
+            weight[own_king_src + ksq, :l1_size].add_(self.virtual_bias[:l1_size])
+        return weight
+
     def merged_weight(self) -> torch.Tensor:
-        return self.weight + self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
+        l1_size = self.num_outputs - self.num_psqt_buckets
+        merged = self.weight + self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
+        return self._fold_virtual_bias(merged, l1_size)
 
     @torch.no_grad()
     def coalesce(self) -> None:
         self.weight.add_(self.virtual_weight.repeat(self.NUM_BUCKETS, 1))
+        self._fold_virtual_bias(self.weight.data, self.num_outputs - self.num_psqt_buckets)
         self.zero_virtual_weights()
 
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
         self.virtual_weight.zero_()
+        self.virtual_bias.zero_()
 
     @torch.no_grad()
     def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None:
         """Initialize virtual weights to zero and set PSQT columns."""
+        self.num_psqt_buckets = num_psqt_buckets
         self.zero_virtual_weights()
 
+        sigma = math.sqrt(1 / self.NUM_INPUTS)
+        self.virtual_bias.uniform_(-sigma, sigma)
+
         scale = 1.0 / nnue2score
-        L1 = self.num_outputs - num_psqt_buckets
+        l1_size = self.num_outputs - num_psqt_buckets
+        self.virtual_bias[l1_size:].zero_()
 
         initial_values = self.halfka_psqts()
         assert len(initial_values) == self.NUM_INPUTS
@@ -99,7 +119,7 @@ class HalfKav2Hm(InputFeature):
         )
 
         for i in range(num_psqt_buckets):
-            self.weight[:, L1 + i] = new_weights
+            self.weight[:, l1_size + i] = new_weights
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:
@@ -107,7 +127,6 @@ class HalfKav2Hm(InputFeature):
 
         Returns a float tensor with NUM_REAL_FEATURES rows.
         """
-        # Coalesce virtual weights
         coalesced = self.merged_weight()
 
         # Remap 12 piece types -> 11 piece types
@@ -141,7 +160,7 @@ class HalfKav2Hm(InputFeature):
 
         Takes a float tensor of shape (NUM_REAL_FEATURES, num_outputs).
         Expands 11->12 piece types and assigns to self.weight.
-        Zeros self.virtual_weight.
+        Zeros virtual parameters.
         """
         expanded = export_weight.new_zeros(self.NUM_INPUTS, export_weight.shape[1])
 
