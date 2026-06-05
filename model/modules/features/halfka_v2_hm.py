@@ -70,22 +70,21 @@ class HalfKav2Hm(InputFeature):
 
         self.reset_parameters()
 
-    def _fold_virtual_bias(self, weight: torch.Tensor, l1_size: int) -> torch.Tensor:
+    def _fold_virtual_bias(self, weight: torch.Tensor) -> torch.Tensor:
         for bucket in range(self.NUM_BUCKETS):
             own_king_src = bucket * self.NUM_PLANES + 10 * 64
             ksq = InverseKingBuckets[bucket]
-            weight[own_king_src + ksq, :l1_size].add_(self.virtual_bias[:l1_size])
+            weight[own_king_src + ksq].add_(self.virtual_bias)
         return weight
 
     def merged_weight(self) -> torch.Tensor:
-        l1_size = self.num_outputs - self.num_psqt_buckets
         merged = self.weight + self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
-        return self._fold_virtual_bias(merged, l1_size)
+        return self._fold_virtual_bias(merged)
 
     @torch.no_grad()
     def coalesce(self) -> None:
         self.weight.add_(self.virtual_weight.repeat(self.NUM_BUCKETS, 1))
-        self._fold_virtual_bias(self.weight.data, self.num_outputs - self.num_psqt_buckets)
+        self._fold_virtual_bias(self.weight.data)
         self.zero_virtual_weights()
 
     @torch.no_grad()
@@ -103,8 +102,8 @@ class HalfKav2Hm(InputFeature):
         self.virtual_bias.uniform_(-sigma, sigma)
 
         scale = 1.0 / nnue2score
-        l1_size = self.num_outputs - num_psqt_buckets
-        self.virtual_bias[l1_size:].zero_()
+        L1 = self.num_outputs - num_psqt_buckets
+        self.virtual_bias[L1:].zero_()
 
         initial_values = self.halfka_psqts()
         assert len(initial_values) == self.NUM_INPUTS
@@ -119,7 +118,7 @@ class HalfKav2Hm(InputFeature):
         )
 
         for i in range(num_psqt_buckets):
-            self.weight[:, l1_size + i] = new_weights
+            self.weight[:, L1 + i] = new_weights
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:

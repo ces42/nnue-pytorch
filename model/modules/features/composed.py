@@ -16,13 +16,7 @@ class ComposedFeatureTransformer(nn.Module):
     everything else to the underlying features.
     """
 
-    def __init__(
-        self,
-        feature_classes: list[Callable[[int], InputFeature]],
-        l1_size: int,
-        num_psqt_buckets: int,
-        quantization: QuantizationManager,
-    ):
+    def __init__(self, feature_classes: list[Callable[[int], InputFeature]], l1_size: int, num_psqt_buckets:int, quantization: QuantizationManager):
         super().__init__()
 
         self.l1_size = l1_size
@@ -56,16 +50,12 @@ class ComposedFeatureTransformer(nn.Module):
         feature_values_0,
         feature_indices_1,
         feature_values_1,
-        fake_quantize_weights: bool = False,
+        fake_quantize_weights: bool=False,
     ):
         merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
         if fake_quantize_weights:
-            w = self.quantization.fake_quantize_weights(
-                merged[:, : self.l1_size], "ft_weight"
-            )
-            pw = self.quantization.fake_quantize_weights(
-                merged[:, self.l1_size :], "ft_psqt_weight"
-            )
+            w  = self.quantization.fake_quantize_weights(merged[:, :self.l1_size], "ft_weight")
+            pw = self.quantization.fake_quantize_weights(merged[:, self.l1_size:], "ft_psqt_weight")
             merged = torch.cat([w, pw], dim=1)
         return (
             SparseLinearFunction.apply(
